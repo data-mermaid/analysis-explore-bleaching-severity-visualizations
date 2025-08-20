@@ -1,0 +1,341 @@
+---
+title: "WCS MERMAID Explore - Bleaching Severity Visualizations"
+author: "Iain R. Caldwell"
+date: 08/19/2025
+format: 
+  html: #for website
+    embed-resources: true
+editor: visual
+code-fold: true
+code-summary: "Show the code"
+toc: true
+title-block-banner: "#f0f3f5"
+title-block-banner-color: "black"
+include-after-body: "footer.html"
+---
+
+This code provides examples of visualizations like those on [MERMAID Explore](https://explore.datamermaid.org/) that show information about bleaching severity (from the bleaching protocol).
+
+------------------------------------------------------------------------
+
+## Getting summary sample event data from MERMAID
+
+The following code downloads summary sample event data from [MERMAID](https://datamermaid.org/) using the mermaidr package (documentation can be found at <https://data-mermaid.github.io/mermaidr/>). The summary sample events contain all surveys (i.e. sample events) that have permissions of "public summary" or "public".
+
+```{r}
+#| label: Load packages and download data
+#| warning: false
+rm(list = ls()) #remove past stored objects
+options(scipen = 999) #turn off scientific notation
+
+####  Load packages and libraries ####
+## If this is the first time using mermaidr, install the package through "remotes"
+# install.packages("remotes")
+# remotes::install_github("data-mermaid/mermaidr")
+# install.packages("tidyverse")
+# install.packages("plotly") 
+# install.packages("htmlwidgets")
+
+library(mermaidr) #package to download data from datamermaid.org
+library(tidyverse) #package that makes it easier to work with data
+library(plotly) #for interactive plotting
+library(htmlwidgets) #for saving plots at html files
+
+#### Get data from MERMAID for creating aggregate visualizations ####
+allMermaidSampEventsTBL <- mermaidr::mermaid_get_summary_sampleevents()
+```
+
+------------------------------------------------------------------------
+
+## Barplot - \# coral colonies by bleaching severity
+
+This code creates a barplot showing the total number of coral colonies across all surveys (summary sample events) that have been found to be in each of seven levels of bleaching severity. It also includes code to show the total number of coral colonies observed at the top of the plot.
+
+```{r}
+#| label: Barplot - number of coral colonies by bleaching severity
+
+### Consolidating the bleaching severity data from the summary sample events
+bleachTotalColoniesSummTBL <- allMermaidSampEventsTBL %>% 
+  filter(!is.na(colonies_bleached_count_total_avg)) %>% 
+  mutate(NumColoniesTotal = colonies_bleached_count_total_avg *
+           colonies_bleached_sample_unit_count) %>% 
+  summarise(TotalColoniesNormal = sum(NumColoniesTotal *
+                                        colonies_bleached_percent_normal_avg/100),
+            TotalColoniesPale = sum(NumColoniesTotal *
+                                      colonies_bleached_percent_pale_avg/100),
+            TotalColonies0to20 = sum(NumColoniesTotal *
+                                       colonies_bleached_percent_20_avg/100),
+            TotalColonies20to50 = sum(NumColoniesTotal *
+                                        colonies_bleached_percent_50_avg/100),
+            TotalColonies50to80 = sum(NumColoniesTotal *
+                                        colonies_bleached_percent_80_avg/100),
+            TotalColonies80to100 = sum(NumColoniesTotal *
+                                         colonies_bleached_percent_100_avg/100),
+            TotalColoniesDead = sum(NumColoniesTotal *
+                                      colonies_bleached_percent_dead_avg/100))
+
+## create fixed label and color mapping for the bleaching categories
+bleachLabels <- factor(x = c("Normal", "Pale", "0-20%", "20-50%", "50-80%", "80-100%", "Dead"),
+                     levels = c("Normal", "Pale", "0-20%", "20-50%", "50-80%", "80-100%", "Dead"))
+
+bleachColorMap <- setNames(
+  object = c("#3c6e9a", "#6288ad", "#85a3c1", "#a8bed5", "#cbdaea", "#eff7ff", "#b4b4b4", "black"),
+  nm = levels(bleachLabels))
+
+bleachingAggBarplot <- 
+  plot_ly(x = bleachLabels,
+          y = as.numeric(bleachTotalColoniesSummTBL[1,]),
+          type = "bar",
+          color = bleachLabels,
+          colors = bleachColorMap,
+          height = 450,
+          hovertemplate = paste('Bleaching severity: %{x}',
+                                '<br>%{y:.0f} colonies',
+                                '<extra></extra>')) %>% 
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c('zoom','pan', 'select', 'zoomIn', 'zoomOut',
+                                    'autoScale', 'resetScale', 'lasso2d',
+                                    'hoverClosestCartesian', 'hoverCompareCartesian')) %>% 
+  layout(showlegend = FALSE,
+         bargap = 0.1,
+         xaxis = list(title = "Bleaching severity",
+                      linecolor = "black",
+                      linewidth = 2),
+         yaxis = list(title = "Number of coral colonies",
+                      linecolor = "black",   # Set the y-axis line color to black
+                      linewidth = 2),
+         annotations = list(
+           list(x = 0, y = 1.15, text = "BLEACHING", showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 20)),
+           list(x = 0, y = 1.08,
+                text = paste0(round(sum(allMermaidSampEventsTBL$colonies_bleached_count_total_avg
+                                        *allMermaidSampEventsTBL$colonies_bleached_sample_unit_count,
+                                        na.rm = T)),
+                              " Colonies"),
+                showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 12))
+         ),
+         margin = list(t = 50, b = 75))  # Increase top margin to create more space for title and subtitle
+
+# Visualize the plot
+bleachingAggBarplot
+```
+
+------------------------------------------------------------------------
+
+## Time series - % of coral colonies by year and bleaching severity
+
+Stacked barplots showing the percent cover (y-axis) by year (x-axis), with different colors representing each of the seven bleaching severity levels (Normal, Pale, 0-20%, 20-50%, 50-80%, 80-100%, Dead).
+
+```{r}
+#| label: Time series - % of coral colonies by year and bleaching severity
+
+### Get the relevant data for bleaching severity
+bleachPercColoniesYearSummTBL <- allMermaidSampEventsTBL %>% 
+  filter(!is.na(colonies_bleached_count_total_avg)) %>% 
+  mutate(NumColoniesTotal = colonies_bleached_count_total_avg *
+           colonies_bleached_sample_unit_count,
+         year = year(sample_date)) %>% 
+  group_by(year) %>% 
+  summarise(TotalColoniesNormal = sum(NumColoniesTotal *
+                                        colonies_bleached_percent_normal_avg/100),
+            TotalColoniesPale = sum(NumColoniesTotal *
+                                      colonies_bleached_percent_pale_avg/100),
+            TotalColonies0to20 = sum(NumColoniesTotal *
+                                       colonies_bleached_percent_20_avg/100),
+            TotalColonies20to50 = sum(NumColoniesTotal *
+                                        colonies_bleached_percent_50_avg/100),
+            TotalColonies50to80 = sum(NumColoniesTotal *
+                                        colonies_bleached_percent_80_avg/100),
+            TotalColonies80to100 = sum(NumColoniesTotal *
+                                         colonies_bleached_percent_100_avg/100),
+            TotalColoniesDead = sum(NumColoniesTotal *
+                                      colonies_bleached_percent_dead_avg/100),
+            TotalAllColonies = sum(NumColoniesTotal)) %>% 
+  ungroup() %>% 
+  mutate(PercColoniesNormal = TotalColoniesNormal/TotalAllColonies*100,
+         PercColoniesPale = TotalColoniesPale/TotalAllColonies*100,
+         PercColonies0to20 = TotalColonies0to20/TotalAllColonies*100,
+         PercColonies20to50 = TotalColonies20to50/TotalAllColonies*100,
+         PercColonies50to80 = TotalColonies50to80/TotalAllColonies*100,
+         PercColonies80to100 = TotalColonies80to100/TotalAllColonies*100,
+         PercColoniesDead = TotalColoniesDead/TotalAllColonies*100)
+
+bleachingTimeSeriesBarplot <- 
+  plot_ly(data = bleachPercColoniesYearSummTBL,
+          x = ~year,
+          y = ~PercColoniesNormal,
+          type = 'bar',
+          name = "Normal",
+          marker = list(color = "#3c6e9a"),
+          height = 450,
+          hovertemplate = paste('Bleaching severity: %{fullData.name}',
+                          '<br>Year: %{x}',
+                          '<br>%{y:.1f}% of colonies',
+                          '<extra></extra>')) %>%
+  add_trace(y = ~PercColoniesPale,
+            name = "Pale",
+            marker = list(color = "#6288ad")) %>% 
+  add_trace(y = ~PercColonies0to20,
+            name = "0-20%",
+            marker = list(color = "#85a3c1")) %>% 
+  add_trace(y = ~PercColonies20to50,
+            name = "20-50%",
+            marker = list(color = "#a8bed5")) %>% 
+  add_trace(y = ~PercColonies50to80,
+            name = "50-80%",
+            marker = list(color = "#cbdaea")) %>% 
+  add_trace(y = ~PercColonies80to100,
+            name = "80-100%",
+            marker = list(color = "#eff7ff")) %>% 
+  add_trace(y = ~PercColoniesDead,
+            name = "Dead",
+            marker = list(color = "#b4b4b4")) %>% 
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c('zoom','pan', 'select', 'zoomIn', 'zoomOut',
+                                    'autoScale', 'resetScale', 'lasso2d',
+                                    'hoverClosestCartesian',
+                                    'hoverCompareCartesian')) %>% 
+  layout(barmode = "stack",
+         bargap = 0.1,
+         yaxis = list(title = "% of Colonies",
+                      linecolor = "black",
+                      hoverformat = '.2f',
+                      tickvals = seq(0, 100, by = 10),  # Set y-axis tick values
+                      ticktext = seq(0, 100, by = 10),
+                      linewidth = 2),
+         xaxis = list(title = "Year",
+                      linecolor = "black",   # Set the x-axis line color to black
+                      linewidth = 2),
+         annotations = list(
+           list(x = 0, y = 1.15, text = "BLEACHING", showarrow = FALSE,
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 20)),
+           list(x = 0, y = 1.08,
+                text = paste0(round(sum(
+                  allMermaidSampEventsTBL$colonies_bleached_count_total_avg *
+                    allMermaidSampEventsTBL$colonies_bleached_sample_unit_count,
+                  na.rm = T)),
+                  " Colonies"),
+                showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 12))
+         ),
+         legend = list(title = list(text = "Bleaching severity:"),
+                       orientation = "h",
+                       xanchor = "center",
+                       x = 0.5, y = -0.2),
+         margin = list(t = 50, b = 75))  # Increase top margin to create more space for title and subtitle
+  
+# Visualize the plot
+bleachingTimeSeriesBarplot
+```
+
+------------------------------------------------------------------------
+
+## Stacked Single Barplot - % of coral colonies by bleaching severity (single bleaching survey)
+
+Code to create a single stacked barplot showing the percent cover (y-axis) for each of the seven levels of bleaching severity levels: Normal, Pale, 0-20%, 20-50%, 50-80%, 80-100%, Dead (each represented by a different color). This code shows an example with a single survey (i.e. sample event) but could be adapted to apply to multiple surveys and sites. In this example I have intentionally selected a sample event that has each bleaching severity level represented but this is not the case for all sample events.
+
+```{r}
+#| label: Single stacked barplot - % of coral colonies by bleaching severity level (single bleaching survey)
+
+### Bleaching severity data for a single sample event 
+bleachSurveySingleSeTBL <-
+  allMermaidSampEventsTBL %>% 
+  filter(colonies_bleached_count_total_avg > 0) %>% 
+  mutate(NumColoniesTotal = colonies_bleached_count_total_avg *
+           colonies_bleached_sample_unit_count) %>% 
+  filter(project == "Semporna PCA" &
+           site == "SWV (Restoration Site 2)")
+
+bleachingSeveritySingleSeBarplot <-
+  plot_ly(data = bleachSurveySingleSeTBL[1,],
+          x = 1,
+          y = ~colonies_bleached_percent_normal_avg,
+          type = 'bar',
+          hovertemplate = paste('%{meta}',
+                                '<br>%{y:.1f}% of colonies',
+                                '<extra></extra>'),
+          name = paste0("Normal (",
+                        bleachSurveySingleSeTBL$
+                          colonies_bleached_percent_normal_avg[1],
+                        "%)"),
+          meta = "Normal",
+          marker = list(color = "#3c6e9a"),
+          height = 450,
+          width = 500) %>%
+  add_trace(y = ~colonies_bleached_percent_pale_avg,
+            name = paste0("Pale (",
+                          bleachSurveySingleSeTBL$
+                            colonies_bleached_percent_pale_avg[1], "%)"),
+            meta = "Pale",
+            marker = list(color = "#6288ad")) %>% 
+  add_trace(y = ~colonies_bleached_percent_20_avg,
+            name = paste0("0-20% bleached (",
+                          bleachSurveySingleSeTBL$
+                            colonies_bleached_percent_20_avg[1], "%)"),
+            meta = "0-20% bleached",
+            marker = list(color = "#85a3c1")) %>% 
+  add_trace(y = ~colonies_bleached_percent_50_avg,
+            name = paste0("20-50% bleached (",
+                          bleachSurveySingleSeTBL$
+                            colonies_bleached_percent_50_avg[1], "%)"),
+            meta = "20-50% bleached",
+            marker = list(color = "#a8bed5")) %>% 
+  add_trace(y = ~colonies_bleached_percent_80_avg,
+            name = paste0("50-80% bleached (",
+                          bleachSurveySingleSeTBL$
+                            colonies_bleached_percent_80_avg[1], "%)"),
+            meta = "50-80% bleached",
+            marker = list(color = "#cbdaea")) %>% 
+  add_trace(y = ~colonies_bleached_percent_100_avg,
+            name = paste0("80-100% bleached (",
+                          bleachSurveySingleSeTBL$
+                            colonies_bleached_percent_100_avg[1], "%)"),
+            meta = "80-100% bleached",
+            marker = list(color = "#eff7ff")) %>% 
+  add_trace(y = ~colonies_bleached_percent_dead_avg,
+            name = paste0("Recently dead (",
+                          bleachSurveySingleSeTBL$
+                            colonies_bleached_percent_dead_avg[1], "%)"),
+            meta = "Recently dead",
+            marker = list(color = "#b4b4b4")) %>% 
+  config(displayModeBar = TRUE,
+         displaylogo = FALSE,
+         modeBarButtonsToRemove = c('zoom','pan', 'select', 'zoomIn', 'zoomOut',
+                                    'autoScale', 'resetScale', 'lasso2d',
+                                    'hoverClosestCartesian',
+                                    'hoverCompareCartesian')) %>% 
+  layout(barmode = "stack",
+         bargap = 0,
+         yaxis = list(title = "% of colonies",
+                      linecolor = "black",
+                      linewidth = 2,
+                      range = c(0,100.2),
+                      tickvals = seq(0, 100, by = 10),  # Set y-axis tick values
+                      ticksuffix = "%"),
+         xaxis = list(title = "",
+                      linecolor = "black",   # Set the x-axis line color to black
+                      linewidth = 2,
+                      showticklabels=FALSE),
+         annotations = list(
+           list(x = 0, y = 1.15, text = "BLEACHING - SEVERITY", showarrow = FALSE,
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 20)),
+           list(x = 0, y = 1.08,
+                text = paste0(bleachSurveySingleSeTBL$NumColoniesTotal[1],
+                             " Colonies"),
+                showarrow = FALSE, 
+                xref = 'paper', yref = 'paper', xanchor = 'left', yanchor = 'top',
+                font = list(size = 12))
+         ),
+         margin = list(t = 50, b = 75))
+
+# Visualize the plot
+bleachingSeveritySingleSeBarplot
+```
